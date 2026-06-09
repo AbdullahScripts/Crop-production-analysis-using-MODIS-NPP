@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cropland Productivity from Satellite NPP · Precision Agriculture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Inter:wght@400;450;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --canvas:#F1F4EA;
+    --panel:#FFFFFF;
+    --soil:#14211A;
+    --soil-panel:#1D2E24;
+    --soil-faint:#93A997;
+    --ink:#18241C;
+    --ink-soft:#47564C;
+    --ink-faint:#7B8B7E;
+    --line:#DCE4D4;
+    --line-strong:#C5D1BC;
+    --canopy:#1F7A3D;
+    --canopy-deep:#145C2C;
+    --ochre:#BE7E37;
+    /* soil → senescent → vigorous canopy : an agronomic productivity ramp */
+    --ramp:linear-gradient(90deg,#6b4a2a 0%,#a07d33 17%,#c7aa2f 33%,#9bbf3f 51%,#5aa345 69%,#2f8a3f 85%,#14622c 100%);
+    --maxw:1000px;
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0;background:var(--canvas);color:var(--ink);
+    font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    font-weight:450;line-height:1.62;-webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 30px;}
+  h1,h2,h3{font-family:"Bricolage Grotesque",sans-serif;margin:0;letter-spacing:-0.015em;line-height:1.06;}
+  .eyebrow{font-family:"IBM Plex Mono",monospace;font-size:.74rem;font-weight:500;letter-spacing:.18em;text-transform:uppercase;}
+
+  /* ---------- field mosaic signature ---------- */
+  .mosaic{display:flex;gap:3px;width:100%;height:46px;}
+  .mosaic span{flex:1;border-radius:2px;transform-origin:bottom;}
+  .mosaic.load span{animation:grow .6s cubic-bezier(.2,.8,.2,1) backwards;}
+  @keyframes grow{from{transform:scaleY(.15);opacity:0;}to{transform:scaleY(1);opacity:1;}}
+
+  /* ---------- hero (dark: field from above) ---------- */
+  .hero{background:var(--soil);color:#EAF0E8;padding:0 0 64px;}
+  .hero .wrap{padding-top:70px;}
+  .hero .eyebrow{color:#7FD49A;}
+  .hero .coord{color:var(--soil-faint);float:right;letter-spacing:.1em;}
+  .hero h1{
+    font-family:"Bricolage Grotesque",sans-serif;font-weight:700;color:#F4F8F2;
+    font-size:clamp(2.4rem,6.2vw,4.4rem);margin:24px 0 0;max-width:15ch;
+  }
+  .hero .lede{font-size:clamp(1.06rem,2.3vw,1.34rem);color:#C6D4C5;max-width:62ch;margin:24px 0 40px;font-weight:400;}
+  .hero .meta{display:flex;flex-wrap:wrap;gap:0;margin-top:42px;border-top:1px solid rgba(255,255,255,.13);}
+  .hero .meta div{flex:1 1 160px;padding:18px 0;border-right:1px solid rgba(255,255,255,.13);}
+  .hero .meta div:last-child{border-right:none;}
+  .hero .meta .lab{font-family:"IBM Plex Mono",monospace;font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;color:var(--soil-faint);}
+  .hero .meta .val{font-family:"Bricolage Grotesque",sans-serif;font-size:1.15rem;font-weight:600;color:#EAF0E8;margin-top:4px;}
+
+  /* ---------- light body ---------- */
+  section{padding:66px 0;border-top:1px solid var(--line);}
+  section:first-of-type{border-top:none;}
+  .sec-head{display:flex;align-items:baseline;gap:16px;margin-bottom:30px;}
+  .sec-head .num{font-family:"IBM Plex Mono",monospace;font-size:.8rem;color:var(--canopy);padding-top:7px;}
+  .sec-head h2{font-size:clamp(1.55rem,3.6vw,2.25rem);font-weight:600;color:var(--ink);}
+  p.body{font-size:1.05rem;color:var(--ink-soft);max-width:68ch;margin:0 0 18px;}
+  p.body strong{color:var(--ink);font-weight:600;}
+
+  /* ---------- workflow zones ---------- */
+  .zones{display:grid;gap:14px;}
+  .zone{
+    background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:22px 24px;display:grid;grid-template-columns:54px 1fr;gap:20px;align-items:center;
+    transition:border-color .2s,transform .2s;
+  }
+  .zone:hover{border-color:var(--line-strong);transform:translateX(3px);}
+  .zone .tile{height:46px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+    font-family:"IBM Plex Mono",monospace;font-size:.95rem;font-weight:500;color:#fff;}
+  .zone h3{font-size:1.08rem;font-weight:600;color:var(--ink);margin-bottom:4px;}
+  .zone p{margin:0;color:var(--ink-soft);font-size:.97rem;}
+
+  /* ---------- data table ---------- */
+  .data{width:100%;border-collapse:collapse;font-size:.96rem;background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;}
+  .data th,.data td{text-align:left;padding:15px 18px;border-bottom:1px solid var(--line);vertical-align:top;}
+  .data th{font-family:"IBM Plex Mono",monospace;font-weight:500;font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);}
+  .data td.id{font-family:"IBM Plex Mono",monospace;color:var(--canopy-deep);white-space:nowrap;}
+  .data tr:last-child td{border-bottom:none;}
+
+  /* ---------- verify / colab CTA ---------- */
+  .verify{
+    background:var(--soil-panel);color:#EAF0E8;border-radius:18px;overflow:hidden;
+    display:grid;grid-template-columns:1.4fr 1fr;
+  }
+  .verify .copy{padding:40px 42px;}
+  .verify h3{font-size:1.5rem;font-weight:600;color:#F4F8F2;}
+  .verify p{color:#BFD0BF;margin:12px 0 26px;font-size:1rem;max-width:42ch;}
+  .cta{
+    display:inline-flex;align-items:center;gap:10px;text-decoration:none;
+    background:#F9A825;color:#1A1205;font-family:"Bricolage Grotesque",sans-serif;font-weight:700;font-size:1.02rem;
+    padding:14px 24px;border-radius:11px;transition:transform .15s,box-shadow .15s;
+  }
+  .cta:hover{transform:translateY(-2px);box-shadow:0 10px 28px rgba(249,168,37,.32);}
+  .cta svg{width:20px;height:20px;}
+  .verify .note{font-family:"IBM Plex Mono",monospace;font-size:.78rem;color:var(--soil-faint);margin-top:18px;}
+  .verify .side{background:var(--ramp);position:relative;min-height:200px;}
+  .verify .side::after{content:"";position:absolute;inset:0;
+    background:repeating-linear-gradient(0deg,transparent 0 21px,rgba(20,33,26,.28) 21px 22px),
+               repeating-linear-gradient(90deg,transparent 0 21px,rgba(20,33,26,.28) 21px 22px);}
+
+  /* ---------- results ---------- */
+  .results{display:grid;gap:28px;}
+  figure.result{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;}
+  figure.result img{display:block;width:100%;height:auto;}
+  .ph{display:flex;align-items:center;justify-content:center;text-align:center;min-height:230px;padding:30px;
+    background:repeating-linear-gradient(45deg,transparent 0 11px,rgba(31,122,61,.05) 11px 22px);
+    font-family:"IBM Plex Mono",monospace;font-size:.85rem;color:var(--ink-faint);border-bottom:1px solid var(--line);}
+  .ph b{display:block;color:var(--canopy-deep);font-weight:500;margin-bottom:4px;}
+  figcaption{padding:18px 22px;font-size:.95rem;color:var(--ink-soft);}
+  figcaption b{color:var(--ink);font-weight:600;}
+
+  /* ---------- methods chips ---------- */
+  .chips{display:flex;flex-wrap:wrap;gap:10px;}
+  .chip{font-family:"IBM Plex Mono",monospace;font-size:.8rem;background:var(--panel);
+    border:1px solid var(--line-strong);border-radius:99px;padding:8px 15px;color:var(--ink-soft);}
+  .chip b{color:var(--canopy-deep);font-weight:500;}
+
+  /* ---------- footer (dark bookend) ---------- */
+  footer{background:var(--soil);color:#EAF0E8;padding:46px 0 70px;}
+  footer .mosaic{margin-bottom:34px;}
+  .footgrid{display:flex;flex-wrap:wrap;justify-content:space-between;gap:24px;align-items:flex-end;}
+  .byline h3{font-size:1.2rem;font-weight:600;color:#F4F8F2;}
+  .byline p{margin:6px 0 0;color:var(--soil-faint);font-size:.92rem;}
+  .contact a{color:#9FE0B4;text-decoration:none;font-family:"IBM Plex Mono",monospace;font-size:.9rem;border-bottom:1px solid rgba(159,224,180,.4);}
+  .contact a:hover{border-color:#9FE0B4;}
+
+  a:focus-visible,.cta:focus-visible{outline:2px solid var(--canopy);outline-offset:3px;}
+  .rv{opacity:0;transform:translateY(15px);transition:opacity .7s ease,transform .7s ease;}
+  .rv.in{opacity:1;transform:none;}
+  @media (prefers-reduced-motion:reduce){
+    .rv{opacity:1;transform:none;transition:none;}
+    .mosaic.load span{animation:none;}
+    html{scroll-behavior:auto;}
+  }
+  @media (max-width:680px){
+    .verify{grid-template-columns:1fr;}
+    .verify .side{min-height:90px;}
+    .verify .copy{padding:32px 26px;}
+    .hero .coord{display:none;}
+    section{padding:48px 0;}
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="eyebrow">Precision Agriculture · Remote Sensing</span>
+    <span class="eyebrow coord">2001–2024 · MODIS NPP</span>
+    <h1>Reading cropland health from twenty years above the field</h1>
+    <p class="lede">A reproducible Earth observation workflow that measures whether farmland in any chosen region has grown more or less productive since 2001 and maps exactly where the change is happening.</p>
+    <div class="mosaic load" aria-hidden="true" id="heroMosaic"></div>
+    <div class="meta">
+      <div><div class="lab">Study period</div><div class="val">2001 – 2024</div></div>
+      <div><div class="lab">Sensor</div><div class="val">MODIS / Terra</div></div>
+      <div><div class="lab">Signal</div><div class="val">Net Primary Productivity</div></div>
+      <div><div class="lab">Stack</div><div class="val">Google Earth Engine · Python</div></div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <section class="rv">
+    <div class="sec-head"><span class="num">01</span><h2>What it measures</h2></div>
+    <p class="body">As crops grow they capture carbon, and satellites estimate how much each year. That yearly figure is <strong>net primary productivity (NPP)</strong>, a direct proxy for how much a growing season produced. Higher NPP on farmland means a more productive year.</p>
+    <p class="body">This workflow isolates NPP <strong>over cropland only</strong>, masking out forest, settlement, and water with a satellite land-cover map then asks two questions of the 2001–2024 record: is productivity trending up or down across the region, and where on the map is it changing fastest?</p>
+  </section>
+
+  <section class="rv">
+    <div class="sec-head"><span class="num">02</span><h2>How the workflow runs</h2></div>
+    <p class="body">A fixed pipeline, each stage feeds the next, so the order carries meaning.</p>
+    <div class="zones" id="zones">
+      <div class="zone"><div class="tile" style="background:#6b4a2a;">01</div><div><h3>Define the region</h3><p>An area of interest is drawn on an interactive map, everything downstream is clipped to it.</p></div></div>
+      <div class="zone"><div class="tile" style="background:#a07d33;">02</div><div><h3>Locate the cropland</h3><p>A MODIS land-cover product flags the cropland class, building a yearly cropland mask.</p></div></div>
+      <div class="zone"><div class="tile" style="background:#9bbf3f;color:#1A2410;">03</div><div><h3>Read productivity, masked to fields</h3><p>Annual NPP is linked to the mask, keeping only cropland pixels and scaling them to real units.</p></div></div>
+      <div class="zone"><div class="tile" style="background:#3e8e41;">04</div><div><h3>Test the regional trend</h3><p>Yearly cropland totals are tested for a real increasing or decreasing trend, plus a break-point year.</p></div></div>
+      <div class="zone"><div class="tile" style="background:#14622c;">05</div><div><h3>Map the change spatially</h3><p>The same trend test runs on every pixel's time series, mapping where productivity rose or fell.</p></div></div>
+    </div>
+  </section>
+
+  <section class="rv">
+    <div class="sec-head"><span class="num">03</span><h2>Data sources</h2></div>
+    <table class="data">
+      <thead><tr><th>Product</th><th>Role</th><th>Resolution</th></tr></thead>
+      <tbody>
+        <tr><td class="id">MOD17A3HGF</td><td>Annual net primary productivity, the productivity signal</td><td>500 m · yearly</td></tr>
+        <tr><td class="id">MCD12Q1</td><td>Land cover used to keep only the cropland class</td><td>500 m · yearly</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="rv">
+    <div class="sec-head"><span class="num">04</span><h2>Verify the analysis</h2></div>
+    <p class="body">The full notebook is open and runnable. Open it in Google Colab to execute every step and reproduce the results directly.</p>
+    <div class="verify">
+      <div class="copy">
+        <h3>Run it yourself</h3>
+        <p>Every cell, data loading, masking, trend tests, and the spatial map runs end to end in the browser.</p>
+        <a class="cta" href="https://colab.research.google.com/drive/1B1A83aE-dwCAmpvzzD9JO-0-zO_uH0t3?usp=sharing" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 8l-4 4 4 4M17 8l4 4-4 4M14 4l-4 16" stroke="#1A1205" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Open in Google Colab
+        </a>
+        <div class="note">// requires a Google Earth Engine account to execute so I added my account for smooth execution </div>
+      </div>
+      <div class="side" aria-hidden="true"></div>
+    </div>
+  </section>
+
+  <section class="rv">
+    <div class="sec-head"><span class="num">05</span><h2>Results</h2></div>
+    <p class="body">Export the three figures from the notebook, save them next to this file with the names shown, and they appear here automatically.</p>
+    <div class="results">
+      <figure class="result">
+        <img src="assests/plot.png" alt="Regional cropland NPP time series, 2001–2024"
+             onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+        <div class="ph" style="display:none;"><span><b>total_npp.png</b>regional NPP time series — the line chart from Cell&nbsp;9</span></div>
+        <figcaption><b>Regional trend.</b> Total cropland NPP per year across the study area, with the long-term trajectory.</figcaption>
+      </figure>
+      <figure class="result">
+        <img src="assests/collection.png" alt="Year-by-year cropland NPP maps"
+             onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+        <div class="ph" style="display:none;"><span><b>npp_yearly_maps.png</b>faceted yearly maps — the grid from Cell&nbsp;11</span></div>
+        <figcaption><b>Year by year.</b> Spatial NPP for each year, showing how productivity shifts across the landscape over time.</figcaption>
+      </figure>
+      <figure class="result">
+        <img src="assests/image.png" alt="Per-pixel productivity change map"
+             onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+        <div class="ph" style="display:none;"><span><b>npp_change.png</b>per-pixel trend slope — the map from Cell&nbsp;12</span></div>
+        <figcaption><b>Where it's changing.</b> Per-pixel trend slope, warm areas gaining productivity, cool areas declining.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="rv">
+    <div class="sec-head"><span class="num">06</span><h2>Statistical methods</h2></div>
+    <p class="body">Trends use non-parametric tests that make no distributional assumptions, suited to short, noisy environmental series.</p>
+    <div class="chips">
+      <span class="chip"><b>Mann–Kendall</b> &nbsp;trend significance &amp; slope</span>
+      <span class="chip"><b>Pettitt</b> &nbsp;change-point detection</span>
+      <span class="chip"><b>Sen's slope</b> &nbsp;rate of change per pixel</span>
+    </div>
+  </section>
+
+</div>
+
+<footer>
+  <div class="wrap">
+    <div class="mosaic" aria-hidden="true" id="footMosaic"></div>
+    <div class="footgrid">
+      <div class="byline">
+        <h3>Muhammad Abdullah</h3>
+        <p>Applied AI for Agriculture</p>
+      </div>
+      <div class="contact"><a href="mailto:muhammad.abdullah.uaf.cs@gmail.com" target="_blank">muhammad.abdullah.uaf.cs@gmail.com</a></div>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // build the field-parcel mosaics along the productivity ramp
+  const palette=["#6b4a2a","#7d5a2c","#94702f","#a98f32","#c7aa2f","#b9bb38","#9bbf3f","#7bb441","#5aa345","#3e9442","#2f8a3f","#206f33","#14622c","#8aa83a","#c19a30","#4f9b43"];
+  function paint(el,n){let h="";for(let i=0;i<n;i++){const c=palette[Math.floor(Math.random()*palette.length)];const ht=55+Math.random()*45;h+=`<span style="background:${c};height:${ht}%;align-self:flex-end;animation-delay:${i*0.04}s"></span>`;}el.innerHTML=h;}
+  paint(document.getElementById('heroMosaic'),18);
+  paint(document.getElementById('footMosaic'),18);
+
+  const obs=new IntersectionObserver((es)=>{es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');obs.unobserve(e.target);}});},{threshold:.12});
+  document.querySelectorAll('.rv').forEach(el=>obs.observe(el));
+</script>
+
+</body>
+</html>
